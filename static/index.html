@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>German Speaking Partner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="app">
+
+    <section id="login" class="screen" hidden>
+      <p class="eyebrow">Sprechpartner</p>
+      <h1>Enter the password</h1>
+      <p class="lede">This practice app is private. Ask whoever shared the link for the password.</p>
+      <form id="login-form" class="login-form">
+        <input id="login-password" type="password" autocomplete="current-password"
+               aria-label="Password" placeholder="Password" required>
+        <button class="primary" type="submit">Continue</button>
+      </form>
+      <p id="login-error" class="note login-error" role="alert" hidden></p>
+    </section>
+
+    <section id="setup" class="screen" hidden>
+      <p class="eyebrow">Sprechpartner</p>
+      <h1>Practise speaking German</h1>
+      <p class="lede">Pick your level. Your partner pitches its words and questions to it.</p>
+
+      <div id="levels" class="levels" role="radiogroup" aria-label="Your German level"></div>
+
+      <button id="start" class="primary" type="button">Start conversation</button>
+      <p id="setup-note" class="note" hidden></p>
+    </section>
+
+    <section id="chat" class="screen" hidden>
+      <header class="bar">
+        <div class="bar-title">
+          <span class="eyebrow">Sprechpartner</span>
+          <span id="level-badge" class="badge"></span>
+        </div>
+        <button id="stop" class="stop" type="button">Stop</button>
+        <button id="restart" class="secondary" type="button" hidden>New conversation</button>
+      </header>
+
+      <p id="banner" class="banner" hidden></p>
+
+      <ol id="messages" class="messages" aria-live="polite"></ol>
+
+      <div id="live" class="live" hidden>
+        <p id="live-text" class="live-text" lang="de"></p>
+        <p id="live-translation" class="live-translation"></p>
+      </div>
+
+      <div id="error" class="error" role="alert" hidden>
+        <span id="error-text"></span>
+        <button id="retry" type="button" hidden>Try again</button>
+      </div>
+
+      <footer id="controls" class="controls">
+        <p id="status" class="status" aria-live="polite"></p>
+        <button id="talk" class="talk" type="button" aria-label="Hold to talk">
+          <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+            <path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-5a3.5 3.5 0 0 0-7 0v5A3.5 3.5 0 0 0 12 15Z" fill="currentColor"/>
+            <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <span id="talk-label">Hold to talk</span>
+        </button>
+        <form id="type-form" class="type-form">
+          <input id="type-input" type="text" lang="de" autocomplete="off" maxlength="500"
+                 placeholder="…or type in German" aria-label="Type in German instead of speaking">
+          <button type="submit" class="secondary">Send</button>
+        </form>
+      </footer>
+    </section>
+
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
