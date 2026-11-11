@@ -22,6 +22,11 @@ export function createTranslator({ serverTranslate }) {
       })();
     },
 
+    // True when translation runs on the device and costs no LLM requests.
+    isLocal() {
+      return Boolean(builtIn);
+    },
+
     async translate(text, signal) {
       if (!text) return '';
       if (builtIn) {
@@ -38,10 +43,19 @@ export function createTranslator({ serverTranslate }) {
 
 // Translates fast-changing partial text: waits for a short pause, and only
 // ever delivers the result for the newest text.
+//
+// On the device this is free, so it follows the speech closely. Through the
+// backend every update is an LLM request against a free-tier quota, so those
+// are spaced out, and paused for a while once the provider says "too many".
+const SERVER_PAUSE = 700; // ms of silence before asking the backend
+const SERVER_SPACING = 3000; // at most one backend request per this many ms
+const SERVER_COOLDOWN = 60000; // back off after a rate-limit answer
+
 export function createLiveTranslation({ translator, onResult, delay = 300 }) {
   let timer = null;
   let ticket = 0;
   let controller = null;
+  let nextServerCall = 0;
 
   function cancel() {
     clearTimeout(timer);
@@ -55,15 +69,19 @@ export function createLiveTranslation({ translator, onResult, delay = 300 }) {
       cancel();
       if (!text) return;
       const mine = ticket;
+      const local = translator.isLocal();
+      const wait = local ? delay : Math.max(SERVER_PAUSE, nextServerCall - Date.now());
       timer = setTimeout(async () => {
         controller = new AbortController();
+        if (!local) nextServerCall = Date.now() + SERVER_SPACING;
         try {
           const translation = await translator.translate(text, controller.signal);
           if (mine === ticket && translation) onResult(translation);
-        } catch {
+        } catch (error) {
           // A missed partial translation is not worth an error message.
+          if (error.status === 429) nextServerCall = Date.now() + SERVER_COOLDOWN;
         }
-      }, delay);
+      }, wait);
     },
     cancel,
   };

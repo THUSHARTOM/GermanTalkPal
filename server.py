@@ -19,7 +19,7 @@ from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from brain import LEVELS, BrainError, make_brain
+from brain import LEVELS, BrainError, RateLimited, make_brain
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -202,6 +202,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json(404, {"error": "Not found"})
         except BadRequest as error:
             self._send_json(400, {"error": str(error)})
+        except RateLimited as error:
+            self._send_json(429, {"error": str(error)})
         except BrainError as error:
             self._send_json(502, {"error": str(error)})
         except (BrokenPipeError, ConnectionResetError):

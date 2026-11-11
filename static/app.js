@@ -61,7 +61,11 @@ async function postJson(path, body, signal) {
   });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 && data.signIn) showLogin(); // the session ended
-  if (!response.ok) throw new Error(data.error || `The server returned an error (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(data.error || `The server returned an error (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -235,6 +239,11 @@ async function askPartner() {
     showThinking(false);
     const learnerRow = state.pendingLearnerRow;
     state.pendingLearnerRow = null;
+    // Without an on-device translator, the translation of what you said
+    // arrives with the reply instead of costing a request of its own.
+    if (learnerRow && data.heard_translation && !translator.isLocal()) {
+      learnerRow.querySelector('.translation').textContent = data.heard_translation;
+    }
     if (learnerRow && data.correction && !sameSentence(data.correction, learnerRow.dataset.text)) {
       addCorrection(learnerRow, data.correction);
     }
@@ -260,9 +269,11 @@ function submitLearner(text) {
   row.dataset.text = text;
   state.pendingLearnerRow = row;
   const translationLine = row.querySelector('.translation');
-  translator.translate(text).then((translation) => {
-    if (session === state.session && translation) translationLine.textContent = translation;
-  }).catch(() => {});
+  if (translator.isLocal()) {
+    translator.translate(text).then((translation) => {
+      if (session === state.session && translation) translationLine.textContent = translation;
+    }).catch(() => {});
+  }
   askPartner();
 }
 

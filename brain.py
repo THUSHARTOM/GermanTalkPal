@@ -29,12 +29,17 @@ PROVIDER_DEFAULTS = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "model": "openai/gpt-oss-120b",
+        "translate_model": "llama-3.1-8b-instant",
     },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        # The newest flash models are often overloaded on the free tier.
-        "model": "gemini-3.5-flash",
-        "fallback_models": ["gemini-flash-lite-latest"],
+        # The free tier allows only 20 requests a day on the full flash models,
+        # which is a few minutes of conversation, so start on a lite model.
+        "model": "gemini-3.5-flash-lite",
+        "fallback_models": ["gemini-flash-lite-latest", "gemini-3.5-flash"],
+        # Free-tier limits are counted per model, so live translation gets a
+        # small fast model of its own and does not eat the conversation's quota.
+        "translate_model": "gemini-flash-lite-latest",
     },
     "ollama": {
         "base_url": "http://localhost:11434/v1",
@@ -49,8 +54,29 @@ class BrainError(Exception):
     """A provider failure with a message that is safe to show in the UI."""
 
 
+class RateLimited(BrainError):
+    """The provider's rate limit was hit on every model that was tried."""
+
+
 class _Busy(Exception):
-    """The model is overloaded or slow; another model may still answer."""
+    """The model is overloaded, slow or rate limited; another model may still answer."""
+
+    def __init__(self, message, rate_limited=False):
+        super().__init__(message)
+        self.rate_limited = rate_limited
+
+
+def _rate_limit_message(provider, model, detail):
+    """Say whether a minute or a day has to pass; the two need different advice."""
+    daily = re.search(r"per day|PerDay|daily|\bRPD\b|tokens per day|\bTPD\b", detail, re.IGNORECASE)
+    if daily:
+        wait = re.search(r"retry in (\d+)h", detail)
+        when = f"in about {int(wait.group(1)) + 1} hours" if wait else "tomorrow"
+        return (
+            f"The free daily limit of {provider} for the model '{model}' is used up. "
+            f"It resets {when}. Set another LLM_MODEL or provider to continue now."
+        )
+    return f"{provider} rate limit reached. Wait a minute and try again."
 
 
 def _system_prompt(level):
@@ -78,8 +104,13 @@ def _system_prompt(level):
         "or swap in fancier vocabulary.\n"
         "- If the message is correct, or there is no learner message yet, use an empty string.\n"
         "\n"
+        "The heard_translation:\n"
+        "- A natural English translation of the learner's most recent message as "
+        "they said it, mistakes and all. Empty string if there is no learner message yet.\n"
+        "\n"
         "Answer with a JSON object only: "
-        '{"correction": "<corrected German sentence, or empty>", '
+        '{"heard_translation": "<English translation of the learner\'s message, or empty>", '
+        '"correction": "<corrected German sentence, or empty>", '
         '"reply": "<your German reply>", '
         '"translation": "<natural English translation of the reply>"}'
     )
@@ -100,25 +131,26 @@ def _parse_json_object(text):
 
 
 class OpenAICompatibleBrain:
-    def __init__(self, provider, base_url, model, api_key="", fallback_models=()):
+    def __init__(self, provider, base_url, model, api_key="", fallback_models=(), translate_model=""):
         self.provider = provider
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.fallback_models = [m for m in fallback_models if m != model]
+        self.translate_model = translate_model or model
         self.api_key = api_key
 
     def describe(self):
         return {"provider": self.provider, "model": self.model, "demo": False}
 
-    def _chat(self, messages):
-        """Try the main model, then the fallbacks if it is overloaded or too slow."""
-        models = [self.model, *self.fallback_models]
+    def _chat(self, messages, models=None):
+        """Try each model in turn while they are overloaded, slow or out of quota."""
+        models = models or [self.model, *self.fallback_models]
         for index, model in enumerate(models):
             try:
                 return self._chat_once(model, messages)
             except _Busy as busy:
                 if index == len(models) - 1:
-                    raise BrainError(str(busy))
+                    raise (RateLimited if busy.rate_limited else BrainError)(str(busy))
 
     def _chat_once(self, model, messages, json_mode=True):
         body = {"model": model, "messages": messages, "temperature": 0.7}
@@ -141,7 +173,8 @@ class OpenAICompatibleBrain:
             with urllib.request.urlopen(request, timeout=20) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", "replace")[:400]
+            detail_full = error.read().decode("utf-8", "replace")
+            detail = detail_full[:400]
             # Not every model accepts JSON mode; fall back to plain text once.
             if json_mode and error.code == 400 and "response_format" in detail:
                 return self._chat_once(model, messages, json_mode=False)
@@ -151,7 +184,8 @@ class OpenAICompatibleBrain:
                     f"{self.provider} key and that LLM_PROVIDER names the service it came from."
                 )
             if error.code == 429:
-                raise BrainError(f"{self.provider} rate limit reached. Wait a moment and try again.")
+                # Another model has its own quota, so this is worth a fallback.
+                raise _Busy(_rate_limit_message(self.provider, model, detail_full), rate_limited=True)
             if error.code == 404:
                 raise BrainError(
                     f"{self.provider} does not know the model '{model}'. Set LLM_MODEL in .env."
@@ -183,7 +217,9 @@ class OpenAICompatibleBrain:
             raise BrainError("The language model returned an empty reply. Try again.")
         has_learner_turn = any(turn["role"] == "learner" for turn in history)
         correction = str(data.get("correction") or "").strip() if has_learner_turn else ""
+        heard = str(data.get("heard_translation") or "").strip() if has_learner_turn else ""
         return {
+            "heard_translation": heard,
             "correction": correction,
             "reply": reply,
             "translation": str(data.get("translation", "")).strip(),
@@ -201,7 +237,10 @@ class OpenAICompatibleBrain:
             },
             {"role": "user", "content": text},
         ]
-        return str(_parse_json_object(self._chat(messages)).get("translation", "")).strip()
+        # Only the translation model: live translation must never spend the
+        # conversation model's quota.
+        reply = self._chat(messages, models=[self.translate_model])
+        return str(_parse_json_object(reply).get("translation", "")).strip()
 
 
 class DemoBrain:
@@ -227,7 +266,7 @@ class DemoBrain:
         learner_turns = sum(1 for turn in history if turn["role"] == "learner")
         reply, translation = self.SCRIPT[learner_turns % len(self.SCRIPT)]
         # The demo brain cannot judge German, so it never offers a correction.
-        return {"correction": "", "reply": reply, "translation": translation}
+        return {"heard_translation": "", "correction": "", "reply": reply, "translation": translation}
 
     def translate(self, text):
         return ""
@@ -253,4 +292,5 @@ def make_brain(env):
         model=env.get("LLM_MODEL", "").strip() or defaults["model"],
         api_key=api_key,
         fallback_models=defaults.get("fallback_models", ()),
+        translate_model=env.get("LLM_TRANSLATE_MODEL", "").strip() or defaults.get("translate_model", ""),
     )
