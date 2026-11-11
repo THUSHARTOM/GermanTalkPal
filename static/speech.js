@@ -6,6 +6,8 @@ const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export function createRecognizer({ lang = 'de-DE', onPartial }) {
   let active = null;
+  let watchdog = null;
+  let finishActive = () => {};
 
   return {
     supported: Boolean(Recognition),
@@ -40,22 +42,51 @@ export function createRecognizer({ lang = 'de-DE', onPartial }) {
       };
 
       return new Promise((resolve) => {
-        recognition.onend = () => {
-          if (active === recognition) active = null;
+        const finish = () => {
+          if (active !== recognition) return; // already finished
+          active = null;
+          clearTimeout(watchdog);
           resolve({ text: (finalText + interimText).replace(/\s+/g, ' ').trim(), error });
         };
+        finishActive = finish;
+        recognition.onend = finish;
         try {
           recognition.start();
         } catch (startError) {
-          active = null;
-          resolve({ text: '', error: 'start-failed' });
+          error = 'start-failed';
+          finish();
         }
       });
     },
 
+    // Ask for the microphone before the first hold. Call from a click handler.
+    // Without this the browser's permission prompt opens in the middle of the
+    // first hold, which breaks that recording.
+    // Resolves to 'granted', 'denied' or 'unknown'.
+    async prepare() {
+      if (!Recognition || !navigator.mediaDevices?.getUserMedia) return 'unknown';
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        return 'granted';
+      } catch (micError) {
+        return micError.name === 'NotAllowedError' || micError.name === 'SecurityError' ? 'denied' : 'unknown';
+      }
+    },
+
     // Finish the utterance and deliver what was heard.
     stop() {
-      if (active) active.stop();
+      if (!active) return;
+      const recognition = active;
+      recognition.stop();
+      // Some browsers never report the end of a recording that was stopped
+      // before it really began. Do not let that block the next one.
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        if (active !== recognition) return;
+        try { recognition.abort(); } catch { /* already gone */ }
+        finishActive();
+      }, 2500);
     },
 
     // Drop the utterance.

@@ -36,6 +36,8 @@ const state = {
   request: null,
   thinkingRow: null,
   pendingLearnerRow: null, // the learner message still waiting for its correction
+  micAsked: false, // the microphone permission was granted on this page
+  micPending: false, // the browser's microphone question is on screen
 };
 
 const voice = createVoice();
@@ -224,7 +226,26 @@ function startConversation() {
   el.chat.hidden = false;
   translator.prepare();
   voice.prepare();
+  prepareMicrophone();
   askPartner();
+}
+
+const MIC_BLOCKED =
+  'Microphone access is blocked. Allow the microphone for this page in the browser, or type below.';
+
+// Get the browser's microphone question out of the way now, so it does not
+// pop up in the middle of the first hold.
+async function prepareMicrophone() {
+  if (state.micAsked || !recognizer.supported) return;
+  state.micAsked = true;
+  state.micPending = true;
+  const session = state.session;
+  const answer = await recognizer.prepare();
+  state.micPending = false;
+  if (answer !== 'granted') state.micAsked = false; // ask again next time
+  if (session !== state.session) return;
+  if (answer === 'denied') showError(MIC_BLOCKED, false);
+  if (state.phase === 'idle') setPhase('idle'); // refresh the status line
 }
 
 async function askPartner() {
@@ -279,6 +300,10 @@ function submitLearner(text) {
 
 function beginTalking() {
   if (state.phase !== 'idle' || !recognizer.supported) return;
+  if (state.micPending) {
+    el.status.textContent = 'First answer the browser\'s microphone question, then hold the button.';
+    return;
+  }
   const session = state.session;
   const done = recognizer.start();
   if (!done) return;
@@ -293,7 +318,7 @@ function beginTalking() {
     if (session !== state.session || state.phase !== 'listening') return;
     if (error === 'not-allowed' || error === 'service-not-allowed') {
       setPhase('idle');
-      showError('Microphone access is blocked. Allow the microphone for this page in the browser, or type below.', false);
+      showError(MIC_BLOCKED, false);
     } else if (error === 'audio-capture') {
       setPhase('idle');
       showError('No microphone was found. Connect one, or type below.', false);
