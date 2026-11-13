@@ -2,8 +2,9 @@ import { createRecognizer } from './speech.js';
 import { createTranslator, createLiveTranslation } from './translate.js';
 import { createVoice } from './voice.js';
 
-// Speak a little slower for the lower levels.
-const SPEECH_RATE = { A1: 0.8, A2: 0.85, B1: 0.95, B2: 1, C1: 1 };
+// Speak a little slower for the two beginner levels. The learner's own
+// "Voice speed" choice multiplies this.
+const SPEECH_RATE = { A1: 0.85, A2: 0.9, B1: 1, B2: 1, C1: 1 };
 
 const LEVEL_NAMES = {
   A1: 'Beginner',
@@ -17,7 +18,7 @@ const DEFAULT_LEVEL = 'B1';
 const $ = (id) => document.getElementById(id);
 const el = {
   setup: $('setup'), chat: $('chat'), levels: $('levels'), start: $('start'),
-  setupNote: $('setup-note'), levelBadge: $('level-badge'), stop: $('stop'),
+  setupNote: $('setup-note'), speed: $('speed'), levelBadge: $('level-badge'), stop: $('stop'),
   restart: $('restart'), banner: $('banner'), messages: $('messages'),
   live: $('live'), liveText: $('live-text'), liveTranslation: $('live-translation'),
   error: $('error'), errorText: $('error-text'), retry: $('retry'),
@@ -36,6 +37,7 @@ const state = {
   request: null,
   thinkingRow: null,
   pendingLearnerRow: null, // the learner message still waiting for its correction
+  speed: 1, // the learner's voice speed choice
   micAsked: false, // the microphone permission was granted on this page
   micPending: false, // the browser's microphone question is on screen
 };
@@ -43,7 +45,21 @@ const state = {
 const voice = createVoice();
 
 function speak(text) {
-  voice.speak(text, { rate: SPEECH_RATE[state.level] || 1 });
+  voice.speak(text, { rate: (SPEECH_RATE[state.level] || 1) * state.speed });
+}
+
+function setupSpeedPicker() {
+  let saved = null;
+  try { saved = localStorage.getItem('speed'); } catch { /* private mode */ }
+  if ([...el.speed.options].some((option) => option.value === saved)) el.speed.value = saved;
+  else el.speed.value = '1';
+  state.speed = Number(el.speed.value);
+  el.speed.addEventListener('change', () => {
+    state.speed = Number(el.speed.value);
+    try { localStorage.setItem('speed', el.speed.value); } catch { /* private mode */ }
+    voice.prepare();
+    speak('So schnell spreche ich jetzt mit dir.'); // let them hear the choice
+  });
 }
 
 // "ich habe gearbeitet." and "Ich habe gearbeitet" are the same answer.
@@ -399,6 +415,7 @@ function buildLevelPicker(levels) {
 
 // ---------- Wiring ----------
 
+setupSpeedPicker();
 el.loginForm.addEventListener('submit', submitLogin);
 el.start.addEventListener('click', startConversation);
 el.stop.addEventListener('click', stopConversation);

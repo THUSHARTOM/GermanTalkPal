@@ -131,6 +131,17 @@ h1 { margin: 6px 0 4px; font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.15
   border-radius: 999px;
 }
 
+.speed { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; font-size: 0.9375rem; }
+
+.speed select {
+  font: inherit;
+  color: inherit;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+}
+
 .note { margin: 16px 0 0; font-size: 0.875rem; color: var(--muted); }
 
 /* ---------- Conversation ---------- */
